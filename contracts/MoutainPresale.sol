@@ -12,29 +12,34 @@ contract PrivateSale is Ownable, ARC20, Pausable, PaymentSplitter {
   string _name = "aMountain";
   string _symbol = "aMTN";
 
+
   // Amount of wei raised
   uint256 public weiRaised;
-  
-  uint256 public _startTime;
-  uint256 public _endTime;
-
-  uint256 constant THREE_DAYS = 3*24*60*60;
-  uint256 _vestingStartTimestamp = 0;
-
-  uint256 public presaleDuration = 7*24*60*60; // One week
 
   // How many token units a buyer gets per AVAX
   uint256 public rate = 10;
 
   // The price for a package (in AVAX)
-  uint256 public packagePrice = 1* 10 ** 18; // NOTE : For tests purposes
+  uint256 public packagePrice = 1 * 10 ** 18; // NOTE : For tests purposes
 
   // Total amount of aMTN that are available for the presale
   uint256 public presaleAmount = 1_000 * 10 ** 18;
 
+  // Presale timestamps
+  uint256 public _presaleStartTimestamp;
+  uint256 public _presaleEndTimestamp;
+  uint256 public presaleDuration = 7*24*60*60; // One week  
+
+  // Vesting timestamps
+  uint256 public _vestingStartTimestamp = 0;
+  uint256 public _vestingEndTimestamp;
+  uint256 public vestingDuration = 3*24*60*60;
+
+
+
   // For test purposes (testing PaymentSplitter)
-  address[] _payees = [0x29Fd00FA40c90aec39AC604D875907874f237baA, 0xf235695A38Cd517eBB66C3af0217d68a192ed8b0];
-  uint256[] _shares = [70,30];
+  //address[] _payees = [0x29Fd00FA40c90aec39AC604D875907874f237baA, 0xf235695A38Cd517eBB66C3af0217d68a192ed8b0];
+  //uint256[] _shares = [70,30];
 
   mapping(address => bool) _isWhitelisted;
   
@@ -55,7 +60,7 @@ contract PrivateSale is Ownable, ARC20, Pausable, PaymentSplitter {
   );
 
  
-  constructor()  ARC20(_name, _symbol) PaymentSplitter(_payees, _shares){
+  constructor(address[] memory _payees, uint256[] memory _shares)  ARC20(_name, _symbol) PaymentSplitter(_payees, _shares){
 
     // Note : the total amount of tokens is minted only once in the constructor
     _mint(address(this), presaleAmount);
@@ -73,21 +78,21 @@ contract PrivateSale is Ownable, ARC20, Pausable, PaymentSplitter {
   // Checks if the presale has started
   modifier hasStarted()
   {
-      require(block.timestamp > _startTime, "Presale has not started yet");
+      require(block.timestamp > _presaleStartTimestamp, "Presale has not started yet");
       _;
   }
   
   // Checks if the presale has not ended
   modifier hasNotEnded()
   {
-      require(block.timestamp < _endTime, "Presale has already finished");
+      require(block.timestamp < _presaleEndTimestamp, "Presale has already finished");
       _;
   }
   
-  // Checks that the SC still has tokens 
+  // Checks that the SC still has half of tokens (Half because we need to keep them for the vested tokens)
   modifier hasTokens()
   {
-      require (balanceOf(address(this)) > 0 , "No tokens left");
+      require (balanceOf(address(this)) > presaleAmount/2 , "No tokens left to sell"); 
       _;
   }
 
@@ -102,7 +107,7 @@ contract PrivateSale is Ownable, ARC20, Pausable, PaymentSplitter {
   modifier isVestingFinished()
   {
       require(_vestingStartTimestamp!=0, "Vesting timestamp has not been set yet");
-      require(block.timestamp > (_vestingStartTimestamp + THREE_DAYS), "Vesting period is over");
+      require(block.timestamp > _vestingEndTimestamp, "Vesting period is not over");
       _;   
       
   }
@@ -110,17 +115,18 @@ contract PrivateSale is Ownable, ARC20, Pausable, PaymentSplitter {
   /**
    * @param startTime Unix timestamp that define the starting time of the presale
    */ 
-  function setStartTime(uint256 startTime) public onlyOwner {
-    _startTime = startTime;
-    _endTime = startTime + presaleDuration;
+  function setPresaleStartTimestamp(uint256 startTime) public onlyOwner {
+    _presaleStartTimestamp = startTime;
+    _presaleEndTimestamp = startTime + presaleDuration;
   }
 
 
   /**
-   * @param vestingStartTime Unix timestamp that define the starting time of the vesting phase
+   * @param startTime Unix timestamp that define the starting time of the vesting phase
    */  
-  function startVesting(uint256 vestingStartTime) public onlyOwner {
-    _vestingStartTimestamp = vestingStartTime;      
+  function setVestingStartTimestamp(uint256 startTime) public onlyOwner {
+    _vestingStartTimestamp = startTime;  
+    _vestingEndTimestamp = startTime + vestingDuration;      
   }
 
   /**
@@ -177,7 +183,7 @@ contract PrivateSale is Ownable, ARC20, Pausable, PaymentSplitter {
   )
     view internal hasStarted hasNotEnded hasTokens isNotPaused
   {
-    require(_beneficiary != address(0), "Buyer addess cannot be 0");
+    require(_beneficiary != address(0), "Buyer address cannot be 0");
     require(_isWhitelisted[_beneficiary], "Buyer not whitelisted");
     require(_weiAmount==packagePrice, "Price not correct");
   }
@@ -204,19 +210,31 @@ contract PrivateSale is Ownable, ARC20, Pausable, PaymentSplitter {
 
   /**
    * @dev Once the vesting is finished, investors can withdraw the 50% left of their tokens
-   * @param withdrawer The address of the investor
    */
-  function withdraw (address withdrawer) public isVestingFinished
+  function withdraw() public isVestingFinished
   {
-      require(withdrawer != address(0), "BEP20: Transfer to zero address");
+      address withdrawer = _msgSender();
+
+      // Revert if the address of the sender is 0
+      require(withdrawer != address(0), "ARC20: Transfer to zero address");
+
+      // Retrieve the withdrawable amount
       uint256 withdrawnAmount = tokenHolders[withdrawer];
+
+      // Revert if the sender has not tokens to withdraw
+      require(withdrawnAmount>0, "No tokens to withdraw");
+
+      // Set the withdrawable amount to 0
+      tokenHolders[withdrawer] = 0;
+
+      // Send the tokens to the sender
       _deliverTokens(withdrawer, withdrawnAmount);
   }
 
   /**
    * @dev All unsold tokens can be sent to the owner of the contract, if not sold out
    */
-  function sendTokensBack() public onlyOwner hasNotEnded
+  function sendTokensBack() public onlyOwner
   {
     transferFrom(address(this), msg.sender, balanceOf(address(this)));
   }
