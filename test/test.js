@@ -29,11 +29,11 @@ contract("PrivateSale", async accounts => {
         const startPresale = currentBlock.timestamp-100; // TMP fix : remove 100s
 
 
-        await privateSale.setStartTime.sendTransaction(startPresale, {from:owner})
+        await privateSale.setPresaleStartTimestamp.sendTransaction(startPresale, {from:owner})
 
         const startVesting = startPresale + 7*24*60*60; // In one week from now
 
-        await privateSale.startVesting.sendTransaction(startVesting, {from:owner}) 
+        await privateSale.setVestingStartTimestamp.sendTransaction(startVesting, {from:owner}) 
 
         // Whitelist Alice and Bob but not Jack
         await privateSale.addToWL.sendTransaction([alice, bob], {from:owner}) 
@@ -127,8 +127,8 @@ contract("PrivateSale", async accounts => {
     it(" one week has passed Alice and bob try to withdraw but fail", async () => {
 
 
-            await privateSale.withdraw.sendTransaction(alice, {from:alice}) 
-            await privateSale.withdraw.sendTransaction(bob, {from:bob}) 
+            await privateSale.withdraw.sendTransaction({from:alice}) 
+            await privateSale.withdraw.sendTransaction({from:bob}) 
 
             
     });
@@ -138,11 +138,20 @@ contract("PrivateSale", async accounts => {
         current_time+=3*60*60*24
         await time.increase(current_time);
 
-        await privateSale.withdraw.sendTransaction(alice, {from:alice}) 
-        await privateSale.withdraw.sendTransaction(bob, {from:bob}) 
+        await privateSale.withdraw.sendTransaction({from:alice}) 
+        await privateSale.withdraw.sendTransaction({from:bob}) 
 
         
 });    
+
+    it(" Alice and bob try to withdraw but fail because already withdrawn", async () => {
+
+        await privateSale.withdraw.sendTransaction({from:alice}) 
+        await privateSale.withdraw.sendTransaction({from:bob}) 
+
+        
+    });   
+ 
 
 
     it ("prints the balances of the SC", async() => {
